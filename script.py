@@ -1,43 +1,52 @@
+import numpy as np
 import pandas as pd
 import re
 
-from utils import get_alpha_code, city_cleaner
+
+from utils import *
 
 
-def prepare_data(data):
-    # remove exactly the same rows
-    data = data.drop_duplicates()  
-    # in some cases there is ; symbol insted of comma, so
-    data['address'] = data['address'].str.replace(';', ',').str.split(',')
-    # remove any whitespaces
-    data['address'] = data['address'].apply(lambda row: list(map(str.strip, row)))
+def clean_data(row):
+    alpha_replacer = replace_to_alpha(row)
+    data = [i.strip() for i in alpha_replacer.split(',')]
+    country_code = get_country(data)
+    if country_code in data:
+        data.remove(country_code)
+    city = city_cleaner(data)
+    place = data.pop() if data else None
+    other = "".join(data) if data else None
+    return np.array([other, place, city, country_code], dtype=object)
+
+
+def proccess_data(data):
+    data['address'] = data['address'].str.replace(';', ',')
+    data[['other','place', 'city', 'country']] = data.apply(
+        lambda row: clean_data(row[0]), result_type='expand', axis=1
+    )
     return data
-
-
-def clean(data):
-    # Make Country column replacing name by alpha2 code
-    data['Country'] = data['address'].apply(lambda row: get_alpha_code(row))
-    # Make City column without address codes
-    data['City'] = data['address'].apply(lambda row: city_cleaner(row))
-    # Make Address column 
-    data['Address'] = data['address'].apply(lambda row: row.pop())
-    # Join other stuff to Additional column
-    data['Additional'] = data['address'].str.join(',')
-
-    data = data.drop(['address'], axis=1)
-    data = data.drop_duplicates(subset=['Address'])
-    data = data.drop_duplicates(subset=['Additional'])
-    return data
-
 
 
 def main():
-    addresses = pd.read_csv('data/addresses.csv')
-    data = prepare_data(addresses)
-    cleaned_data = clean(data)
-    cleaned_data.to_csv('final.csv', index=False)
-    
+    chunk_list = []
+    addresses = pd.read_csv('data/addresses.csv', chunksize=10000)
 
+    for chunk in addresses:
+        data = proccess_data(chunk)
+        chunk_list.append(data)
+
+    dataframe = pd.concat(chunk_list)
+    dataframe.drop_duplicates()
+    
+    dataframe = dataframe.drop(['address'], axis=1)
+    dataframe.drop_duplicates(subset=['place', 'city', 'country'], inplace=True)
+    dataframe.drop_duplicates(subset=['place', 'city'], inplace=True)
+    dataframe.drop_duplicates(subset=['place', 'country'], inplace=True)
+    dataframe.drop_duplicates(subset=['place', 'other'], inplace=True)
+    dataframe.drop_duplicates(subset=['place'], inplace=True)
+    dataframe = dataframe.drop(['other'], axis=1)
+
+    dataframe.to_csv('results.csv', index=False)
+    
 
 if __name__ == '__main__':
     main()
